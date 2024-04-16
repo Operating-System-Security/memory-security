@@ -332,6 +332,14 @@ shellcode 最终构造了参数为 `execve("/bin/bash", ["/bin/bash", NULL], [NU
 
 ![alt text](./img/hacked.png)
 
+开启数据执行保护机制，即去掉 gcc 的 `-z execstack` 选项，并将头部地址修改，重新运行：
+
+![](./img/sigsegv-head.png)
+
+![](./img/sigsegv.png)
+
+程序收到了 `SIGSEGV` 信号，被终止执行，出错的地址为 shellcode 的起始地址，即 `0xffffbfd0 + 0x104 = 0xffffc0d4`。
+
 ## 参考
 
 - [cs6265 实验手册](https://tc.gts3.org/cs6265/2021/tut/tut02-warmup2.html)
