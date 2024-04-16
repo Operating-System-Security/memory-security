@@ -102,6 +102,14 @@ int main(int argc, char *argv[])
 
 可以构造 payload，将 shellcode 直接放置在 `input` 中，并利用 `strcpy` 函数将 `input` 头部的数据拷贝到 `buf`，这些头部数据将覆盖栈帧中的返回地址，将控制流转移到 `input` 的 shellcode。
 
+### 安全机制及规避
+
+注意，payload 注入后位于栈上，而我们需要运行这一段内容，因此在编译漏洞代码时，需要指定 gcc 参数 `-z execstack`，使栈上内容可执行，具体 ELF 中的区别为：
+
+![alt text](./img/execstack.png)
+
+添加 `-z execstack` 参数的 ELF 文件中 GNU_STACK segment 属性为 `RWE`。
+
 ### 攻击准备
 
 1. 通过反汇编查看 `main` 函数的栈帧：
